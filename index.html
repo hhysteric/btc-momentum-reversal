@@ -116,7 +116,7 @@
     <div id="chart-comp" class="chart"></div>
   </div>
   <div class="chart-box">
-    <div class="chart-title"><b>资金费率 Funding Rate（日均为 8h 费率，%）</b><div class="legend" id="lg-fund"></div></div>
+    <div class="chart-title"><b>资金费率 <span id="fund-title">（当日 8h 均值，%）</span></b><div class="legend" id="lg-fund"></div></div>
     <div id="chart-fund" class="chart"></div>
   </div>
 
@@ -206,6 +206,16 @@ function renderCards(d) {
   $('params-line').innerHTML = `当前参数：<code>revLen=${p.revLen}</code> <code>momLen=${p.momLen}</code> <code>momSkip=${p.momSkip}</code> <code>normLen=${p.normLen}</code> <code>entryThr=${p.entryThr}</code> <code>noiseGain=${p.noiseGain}</code>（由 scripts/backtest.py 网格搜索优化）`;
 }
 
+// Full-length series: keep nulls as whitespace points so every chart shares the
+// exact same index -> time mapping (dropping them makes logical-range sync drift).
+function points(times, arr, extra) {
+  return times.map((t, i) => {
+    const v = arr[i];
+    if (v == null) return { time: t };
+    return Object.assign({ time: t, value: v }, extra ? extra(v) : null);
+  });
+}
+
 function buildCharts(d) {
   ['chart-price', 'chart-comp', 'chart-fund'].forEach(id => $(id).innerHTML = '');
   const D = d.data;
@@ -236,11 +246,11 @@ function buildCharts(d) {
   // ── composite chart ──
   const cComp = LWC.createChart($('chart-comp'), CHART_OPTS);
   const compLine = cComp.addSeries(LWC.LineSeries, { color: ACCENT, lineWidth: 2, priceLineVisible: false });
-  compLine.setData(times.map((t, i) => ({ time: t, value: D.composite[i] })).filter(p => p.value != null));
+  compLine.setData(points(times, D.composite));
   const revLine = cComp.addSeries(LWC.LineSeries, { color: REV, lineWidth: 1, priceLineVisible: false });
-  revLine.setData(times.map((t, i) => ({ time: t, value: D.rev[i] })).filter(p => p.value != null));
+  revLine.setData(points(times, D.rev));
   const momLine = cComp.addSeries(LWC.LineSeries, { color: MOM, lineWidth: 1, priceLineVisible: false });
-  momLine.setData(times.map((t, i) => ({ time: t, value: D.mom[i] })).filter(p => p.value != null));
+  momLine.setData(points(times, D.mom));
   const thr = d.params.entryThr ?? 0.5;
   [[0, '#8b949e', '0'], [thr, 'rgba(38,166,154,.7)', `+${thr}`], [-thr, 'rgba(239,83,80,.7)', `-${thr}`]]
     .forEach(([v, color, title]) => compLine.createPriceLine({ price: v, color, lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, title }));
@@ -248,13 +258,9 @@ function buildCharts(d) {
   // ── funding chart ──
   const cFund = LWC.createChart($('chart-fund'), CHART_OPTS);
   const fund = cFund.addSeries(LWC.HistogramSeries, { priceLineVisible: false });
-  const fundData = [];
-  times.forEach((t, i) => {
-    const f = D.funding_rate[i];
-    if (f == null) return;
-    fundData.push({ time: t, value: f * 100, color: f >= 0 ? 'rgba(38,166,154,.7)' : 'rgba(239,83,80,.7)' });
-  });
-  fund.setData(fundData);
+  fund.setData(points(times, D.funding_rate, v => ({
+    value: v * 100, color: v >= 0 ? 'rgba(38,166,154,.7)' : 'rgba(239,83,80,.7)',
+  })));
   fund.createPriceLine({ price: 0, color: '#8b949e', lineWidth: 1, lineStyle: LWC.LineStyle.Solid });
 
   [cPrice, cComp, cFund].forEach(c => c.timeScale().applyOptions({ rightOffset: 3 }));
@@ -332,6 +338,7 @@ function renderSignals(d) {
 
 async function show(name) {
   const d = await loadTF(name);
+  $('fund-title').textContent = name === 'daily' ? '（当日 8h 均值，%）' : '（区间日均值，%）';
   renderCards(d);
   buildCharts(d);
   renderSignals(d);

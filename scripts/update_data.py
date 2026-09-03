@@ -21,6 +21,7 @@ Model mapping (paper -> indicator):
   Prediction c          -> noise up => wRev up, wMom down
 """
 
+import bisect
 import io
 import json
 import math
@@ -367,6 +368,44 @@ def true_range(h, lo, c):
     return tr
 
 
+def align_funding(ts_list: list, funding_daily: dict, ffill: int = 3) -> list:
+    """Map daily funding onto candle timestamps.
+
+    Daily candles -> that day's funding. Weekly / monthly candles -> the average
+    funding over the bar's date span (a single-day snapshot is not comparable
+    across timeframes). Short trailing gaps (data-dump lag, a few days) are
+    forward-filled so the curve reaches the latest candle. Missing data before
+    the first available funding date stays null.
+
+    Returns a list with the SAME length as ts_list - nulls are kept in place so
+    the charting frontend stays index-aligned with the price series.
+    """
+    keys = sorted(funding_daily)
+    vals_sorted = [funding_daily[k] for k in keys]
+    span = max(1, (ts_list[1] - ts_list[0]) // 86400000) if len(ts_list) > 1 else 1
+
+    def day(ms):
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+
+    out, gap = [], 0
+    for i, t in enumerate(ts_list):
+        d0 = day(t)
+        d1 = (day(ts_list[i + 1]) if i + 1 < len(ts_list)
+              else day(t + 86400000 * span))
+        lo = bisect.bisect_left(keys, d0)
+        hi = bisect.bisect_left(keys, d1)
+        seg = vals_sorted[lo:hi]
+        val = sum(seg) / len(seg) if seg else None
+        if val is None:
+            if span == 1 and out and out[-1] is not None and gap < ffill:
+                val = out[-1]      # trailing dump lag
+            gap += 1
+        else:
+            gap = 0
+        out.append(val)
+    return out
+
+
 def rma(arr, period):
     n = len(arr)
     out = [None] * n
@@ -650,10 +689,8 @@ def main():
               f"({datetime.fromtimestamp(data['ts'][0]/1000, tz=timezone.utc):%Y-%m-%d} -> "
               f"{datetime.fromtimestamp(data['ts'][-1]/1000, tz=timezone.utc):%Y-%m-%d})")
 
-        funding_aligned = [
-            funding_daily.get(datetime.fromtimestamp(t / 1000, tz=timezone.utc).strftime("%Y-%m-%d"))
-            for t in data["ts"]
-        ]
+        funding_aligned = align_funding(data["ts"], funding_daily)
+        print(f"  funding aligned: {sum(v is not None for v in funding_aligned)}/{data['n']} bars")
 
         p = dict(base, barsYear=cfg["barsYear"], corrLen=base["normLen"], deadZone=DEAD_ZONE) \
             if cfg["scale"] == 1 else scale_params(base, cfg["scale"], cfg["barsYear"])
