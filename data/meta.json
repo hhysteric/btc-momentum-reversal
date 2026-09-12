@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-11T05:49:41.323850+00:00",
+  "generated_at": "2026-09-12T05:37:40.435547+00:00",
   "source": "Binance BTCUSDT spot + USD-M funding",
   "model": "JLST (2025, RFS) reversal-momentum composite, BTC-adapted",
   "timeframes": [
@@ -7,5 +7,5 @@
     "weekly",
     "monthly"
   ],
-  "funding_days": 2436
+  "funding_days": 2437
 }
